@@ -62,7 +62,7 @@ def main():
         artist_query = " OR ".join([f'"{a}"' for a in chunk])
         query = f'intitle:chart ({artist_query})'
         
-        url = "https://www.googleapis.com/customsearch/v1"
+        url = "https://customsearch.googleapis.com/customsearch/v1"
         params = {
             'key': api_key,
             'cx': cse_id,

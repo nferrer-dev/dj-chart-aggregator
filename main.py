@@ -102,6 +102,14 @@ def main():
     
     # Always write the feed, even if no new entries were found today, 
     # to maintain the file existence for GitHub Pages
+    if not new_entries_found:
+        fe = fg.add_entry()
+        fe.id('init-1')
+        fe.title('DJ Chart Aggregator is Live!')
+        fe.link(href='https://github.com/nferrer-dev/dj-chart-aggregator')
+        fe.description('Your custom pipeline is successfully connected. New charts will appear here when they are published.')
+        fe.pubDate(datetime.now(timezone.utc))
+
     fg.rss_file('output/feed.xml')
     print("Feed generated at output/feed.xml")
 

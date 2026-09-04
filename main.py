@@ -94,8 +94,12 @@ def main():
                     new_entries_found = True
                     print(f"Added new chart: {title}")
                     
-        except Exception as e:
+        except requests.exceptions.HTTPError as e:
             print(f"Error querying Google CSE: {e}")
+            if e.response is not None:
+                print(f"Raw Google Error Payload: {e.response.text}")
+        except Exception as e:
+            print(f"Unexpected error: {e}")
 
     # Ensure output directory exists
     os.makedirs('output', exist_ok=True)

@@ -5,8 +5,6 @@ import hashlib
 from datetime import datetime, timezone
 import requests
 from feedgen.feed import FeedGenerator
-from google.oauth2 import service_account
-from google.auth.transport.requests import AuthorizedSession
 
 def chunk_list(lst, chunk_size):
     """Yield successive chunk_size-sized chunks from lst."""
@@ -28,22 +26,13 @@ def mark_seen(url, redis_url, redis_token):
     requests.post(f"{redis_url}/set/{key}/1/EX/2592000", headers={"Authorization": f"Bearer {redis_token}"})
 
 def main():
-    service_account_json_str = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-    cse_id = os.environ.get("GOOGLE_CSE_ID")
+    serper_api_key = os.environ.get("SERPER_API_KEY")
     redis_url = os.environ.get("UPSTASH_REDIS_REST_URL")
     redis_token = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
     
-    if not all([service_account_json_str, cse_id, redis_url, redis_token]):
+    if not all([serper_api_key, redis_url, redis_token]):
         print("Missing required environment variables.")
         return
-
-    # Authenticate via Service Account
-    creds_info = json.loads(service_account_json_str)
-    # No specific scopes are strictly required for Custom Search, but we pass cloud-platform to be safe
-    credentials = service_account.Credentials.from_service_account_info(
-        creds_info, scopes=['https://www.googleapis.com/auth/cloud-platform']
-    )
-    authed_session = AuthorizedSession(credentials)
 
     # Load artists
     if os.path.exists('artists.json'):
@@ -62,35 +51,44 @@ def main():
     fg.description('Automated chronological feed of DJ charts from Beatport, Traxsource, and Volumo.')
     fg.language('en')
 
-    # Chunk into 8 to respect 32-word limit
+    # Chunk into 8 to respect typical search query limits
     chunks = chunk_list(artists, 8)
     
     new_entries_found = False
 
+    url = "https://google.serper.dev/search"
+    headers = {
+        'X-API-KEY': serper_api_key,
+        'Content-Type': 'application/json'
+    }
+
     for chunk in chunks:
-        # Build the exact query
+        # Build the exact query focusing on our target domains
         artist_query = " OR ".join([f'"{a}"' for a in chunk])
-        query = f'intitle:chart ({artist_query})'
+        # Force the search index to pull charts from specific domains
+        query = f'intitle:chart ({artist_query}) (site:beatport.com OR site:traxsource.com OR site:volumo.com)'
         
-        url = "https://customsearch.googleapis.com/customsearch/v1"
-        params = {
-            'cx': cse_id,
-            'q': query,
-            'dateRestrict': 'm1', # Backfill: look for charts indexed in the last month
-            'num': 10
-        }
-        
+        payload = json.dumps({
+            "q": query,
+            "num": 10,
+            "tbs": "qdr:m" # Backfill: look for charts indexed in the last month
+        })
+
         try:
-            # We use the AuthorizedSession which automatically injects the Bearer token
-            resp = authed_session.get(url, params=params)
+            resp = requests.post(url, headers=headers, data=payload)
             resp.raise_for_status()
             data = resp.json()
             
-            for item in data.get('items', []):
+            # Serper.dev returns search results in the 'organic' array
+            for item in data.get('organic', []):
                 link = item.get('link')
                 title = item.get('title')
-                snippet = item.get('snippet')
+                snippet = item.get('snippet', '') # Robust fallback as requested by Design Validation
                 
+                # Ensure the link is actually one of our target sites to prevent false positives
+                if not any(domain in link for domain in ['beatport.com', 'traxsource.com', 'volumo.com']):
+                    continue
+
                 # Deduplicate using Upstash Redis
                 if not is_seen(link, redis_url, redis_token):
                     fe = fg.add_entry()
@@ -105,9 +103,9 @@ def main():
                     print(f"Added new chart: {title}")
                     
         except requests.exceptions.HTTPError as e:
-            print(f"Error querying Google CSE: {e}")
+            print(f"Error querying Serper.dev: {e}")
             if e.response is not None:
-                print(f"Raw Google Error Payload: {e.response.text}")
+                print(f"Raw Serper Error Payload: {e.response.text}")
         except Exception as e:
             print(f"Unexpected error: {e}")
 
@@ -121,7 +119,7 @@ def main():
         fe.id('init-1')
         fe.title('DJ Chart Aggregator is Live!')
         fe.link(href='https://github.com/nferrer-dev/dj-chart-aggregator')
-        fe.description('Your custom pipeline is successfully connected. New charts will appear here when they are published.')
+        fe.description('Your custom pipeline is successfully connected via Serper.dev. New charts will appear here when they are published.')
         fe.pubDate(datetime.now(timezone.utc))
 
     fg.rss_file('output/feed.xml')

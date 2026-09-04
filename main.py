@@ -67,7 +67,7 @@ def main():
             'key': api_key,
             'cx': cse_id,
             'q': query,
-            'dateRestrict': 'd1', # Only look for charts indexed in the last 24h
+            'dateRestrict': 'm1', # Backfill: look for charts indexed in the last month
             'num': 10
         }
         

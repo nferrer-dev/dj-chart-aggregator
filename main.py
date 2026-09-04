@@ -5,6 +5,8 @@ import hashlib
 from datetime import datetime, timezone
 import requests
 from feedgen.feed import FeedGenerator
+from google.oauth2 import service_account
+from google.auth.transport.requests import AuthorizedSession
 
 def chunk_list(lst, chunk_size):
     """Yield successive chunk_size-sized chunks from lst."""
@@ -26,14 +28,22 @@ def mark_seen(url, redis_url, redis_token):
     requests.post(f"{redis_url}/set/{key}/1/EX/2592000", headers={"Authorization": f"Bearer {redis_token}"})
 
 def main():
-    api_key = os.environ.get("GOOGLE_API_KEY")
+    service_account_json_str = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
     cse_id = os.environ.get("GOOGLE_CSE_ID")
     redis_url = os.environ.get("UPSTASH_REDIS_REST_URL")
     redis_token = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
     
-    if not all([api_key, cse_id, redis_url, redis_token]):
+    if not all([service_account_json_str, cse_id, redis_url, redis_token]):
         print("Missing required environment variables.")
         return
+
+    # Authenticate via Service Account
+    creds_info = json.loads(service_account_json_str)
+    # No specific scopes are strictly required for Custom Search, but we pass cloud-platform to be safe
+    credentials = service_account.Credentials.from_service_account_info(
+        creds_info, scopes=['https://www.googleapis.com/auth/cloud-platform']
+    )
+    authed_session = AuthorizedSession(credentials)
 
     # Load artists
     if os.path.exists('artists.json'):
@@ -64,7 +74,6 @@ def main():
         
         url = "https://customsearch.googleapis.com/customsearch/v1"
         params = {
-            'key': api_key,
             'cx': cse_id,
             'q': query,
             'dateRestrict': 'm1', # Backfill: look for charts indexed in the last month
@@ -72,7 +81,8 @@ def main():
         }
         
         try:
-            resp = requests.get(url, params=params)
+            # We use the AuthorizedSession which automatically injects the Bearer token
+            resp = authed_session.get(url, params=params)
             resp.raise_for_status()
             data = resp.json()
             

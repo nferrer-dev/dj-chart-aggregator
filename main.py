@@ -70,8 +70,8 @@ def main():
     }
 
     for chunk in chunks:
-        # Build the exact query focusing on our target domains and requiring the artist in the title
-        artist_query = " OR ".join([f'intitle:"{a}"' for a in chunk])
+        # Build the exact query focusing on our target domains
+        artist_query = " OR ".join([f'"{a}"' for a in chunk])
         query = f'intitle:chart ({artist_query}) (site:beatport.com OR site:traxsource.com OR site:volumo.com)'
         
         payload = json.dumps({

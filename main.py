@@ -71,7 +71,7 @@ def main():
         payload = json.dumps({
             "q": query,
             "num": 10,
-            "tbs": "qdr:m" # Backfill: look for charts indexed in the last month
+            "tbs": "qdr:y"  # Backfill: look for charts indexed in the last year
         })
 
         try:
@@ -83,11 +83,30 @@ def main():
             for item in data.get('organic', []):
                 link = item.get('link')
                 title = item.get('title')
-                snippet = item.get('snippet', '') # Robust fallback as requested by Design Validation
+                snippet = item.get('snippet', '')
+                image_url = item.get('imageUrl')
                 
                 # Ensure the link is actually one of our target sites to prevent false positives
                 if not any(domain in link for domain in ['beatport.com', 'traxsource.com', 'volumo.com']):
                     continue
+
+                # Build Rich HTML Description
+                html_desc = ""
+                if image_url:
+                    html_desc += f'<img src="{image_url}" style="max-width:100%; border-radius:8px;"/><br/><br/>'
+                
+                html_desc += f'<p>{snippet}</p><br/>'
+                
+                # Determine Domain Name for the button
+                domain_name = "the Store"
+                if "beatport.com" in link:
+                    domain_name = "Beatport"
+                elif "traxsource.com" in link:
+                    domain_name = "Traxsource"
+                elif "volumo.com" in link:
+                    domain_name = "Volumo"
+                
+                html_desc += f'<a href="{link}" target="_blank"><strong>🔗 View Full Chart on {domain_name}</strong></a>'
 
                 # Deduplicate using Upstash Redis
                 if not is_seen(link, redis_url, redis_token):
@@ -95,7 +114,7 @@ def main():
                     fe.id(link)
                     fe.title(title)
                     fe.link(href=link)
-                    fe.description(snippet)
+                    fe.description(html_desc)
                     fe.pubDate(datetime.now(timezone.utc))
                     
                     mark_seen(link, redis_url, redis_token)

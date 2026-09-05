@@ -72,94 +72,107 @@ def main():
     for chunk in chunks:
         # Build the exact query focusing on our target domains
         artist_query = " OR ".join([f'"{a}"' for a in chunk])
-        query = f'intitle:chart ({artist_query}) (site:beatport.com OR site:traxsource.com OR site:volumo.com)'
+        query = (
+            f'intitle:chart ({artist_query}) '
+            f'(site:beatport.com OR site:traxsource.com OR site:volumo.com)'
+        )
         
-        payload = json.dumps({
-            "q": query,
-            "num": 10,
-            "tbs": "qdr:y"  # Backfill: look for charts indexed in the last year
-        })
+        # Paginate to fetch 40 results per chunk (4 pages of 10) to get a deep backfill
+        # 4 pages * 17 chunks = 68 requests/day (2108/month, safely under 2500 free limit)
+        for page in range(1, 5):
+            payload = json.dumps({
+                "q": query,
+                "num": 10,
+                "page": page,
+                "tbs": "qdr:y"  # Backfill: look for charts indexed in the last year
+            })
 
-        try:
-            resp = requests.post(url, headers=headers, data=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            
-            valid_items = []
-            
-            # Serper.dev returns search results in the 'organic' array
-            for item in data.get('organic', []):
-                raw_link = item.get('link') or ""
-                title = item.get('title') or ""
-                snippet = item.get('snippet') or ""
-                image_url = item.get('imageUrl')
+            try:
+                resp = requests.post(url, headers=headers, data=payload)
+                resp.raise_for_status()
+                data = resp.json()
                 
-                # Strip tracking parameters (like ?srsltid=) to prevent duplicate charts
-                link = raw_link.split('?')[0]
+                valid_items = []
                 
-                # Ensure the link is actually one of our target sites to prevent false positives
-                if not any(domain in link for domain in ['beatport.com', 'traxsource.com', 'volumo.com']):
-                    continue
+                # Serper.dev returns search results in the 'organic' array
+                for item in data.get('organic', []):
+                    raw_link = item.get('link') or ""
+                    title = item.get('title') or ""
+                    snippet = item.get('snippet') or ""
+                    image_url = item.get('imageUrl')
+                    
+                    # Strip tracking parameters (like ?srsltid=) to prevent duplicate charts
+                    link = raw_link.split('?')[0]
+                    
+                    # Ensure the link is actually one of our target sites to prevent false positives
+                    if not any(domain in link for domain in ['beatport.com', 'traxsource.com', 'volumo.com']):
+                        continue
 
-                # Strict Check: Ensure the chart was actually CREATED by one of our chunked artists
-                # by verifying their name appears in the title tag.
-                if not any(a.lower() in title.lower() for a in chunk):
+                    # Strict Check: Ensure the chart was actually CREATED by one of our chunked artists
+                    # by verifying their name appears in the title tag.
+                    if not any(a.lower() in title.lower() for a in chunk):
+                        continue
+                        
+                    valid_items.append({
+                        'link': link,
+                        'title': title,
+                        'snippet': snippet,
+                        'image_url': image_url
+                    })
+                    
+                if not valid_items:
                     continue
                     
-                valid_items.append({
-                    'link': link,
-                    'title': title,
-                    'snippet': snippet,
-                    'image_url': image_url
-                })
+                # Filter against Upstash Redis in one bulk MGET request
+                links_to_check = [item['link'] for item in valid_items]
+                unseen_links = get_unseen_links(links_to_check, redis_url, redis_token)
                 
-            if not valid_items:
-                continue
+                new_links_to_mark = []
+                for item in valid_items:
+                    if item['link'] in unseen_links:
+                        html_desc = ""
+                        if item['image_url']:
+                            html_desc += (
+                                f'<img src="{item["image_url"]}" '
+                                f'style="max-width:100%; border-radius:8px;"/><br/><br/>'
+                            )
+                        
+                        html_desc += f'<p>{item["snippet"]}</p><br/>'
+                        
+                        domain_name = "the Store"
+                        if "beatport.com" in item['link']:
+                            domain_name = "Beatport"
+                        elif "traxsource.com" in item['link']:
+                            domain_name = "Traxsource"
+                        elif "volumo.com" in item['link']:
+                            domain_name = "Volumo"
+                        
+                        html_desc += (
+                            f'<a href="{item["link"]}" target="_blank">'
+                            f'<strong>🔗 View Full Chart on {domain_name}</strong></a>'
+                        )
+                        
+                        fe = fg.add_entry()
+                        fe.id(item['link'])
+                        fe.title(item['title'])
+                        fe.link(href=item['link'])
+                        fe.description(html_desc)
+                        fe.pubDate(datetime.now(timezone.utc))
+                        
+                        new_links_to_mark.append(item['link'])
+                        new_entries_found = True
+                        print(f"Added new chart: {item['title']}")
                 
-            # Filter against Upstash Redis in one bulk MGET request
-            links_to_check = [item['link'] for item in valid_items]
-            unseen_links = get_unseen_links(links_to_check, redis_url, redis_token)
-            
-            new_links_to_mark = []
-            for item in valid_items:
-                if item['link'] in unseen_links:
-                    html_desc = ""
-                    if item['image_url']:
-                        html_desc += f'<img src="{item["image_url"]}" style="max-width:100%; border-radius:8px;"/><br/><br/>'
-                    
-                    html_desc += f'<p>{item["snippet"]}</p><br/>'
-                    
-                    domain_name = "the Store"
-                    if "beatport.com" in item['link']:
-                        domain_name = "Beatport"
-                    elif "traxsource.com" in item['link']:
-                        domain_name = "Traxsource"
-                    elif "volumo.com" in item['link']:
-                        domain_name = "Volumo"
-                    
-                    html_desc += f'<a href="{item["link"]}" target="_blank"><strong>🔗 View Full Chart on {domain_name}</strong></a>'
-                    
-                    fe = fg.add_entry()
-                    fe.id(item['link'])
-                    fe.title(item['title'])
-                    fe.link(href=item['link'])
-                    fe.description(html_desc)
-                    fe.pubDate(datetime.now(timezone.utc))
-                    
-                    new_links_to_mark.append(item['link'])
-                    new_entries_found = True
-                    print(f"Added new chart: {item['title']}")
-            
-            # Bulk write new links to cache
-            if new_links_to_mark:
-                mark_seen_bulk(new_links_to_mark, redis_url, redis_token)
-                    
-        except requests.exceptions.HTTPError as e:
-            print(f"Error querying Serper.dev: {e}")
-            if e.response is not None:
-                print(f"Raw Serper Error Payload: {e.response.text}")
-        except Exception as e:
-            print(f"Unexpected error: {e}")
+                # Bulk write new links to cache
+                if new_links_to_mark:
+                    mark_seen_bulk(new_links_to_mark, redis_url, redis_token)
+                        
+            except requests.exceptions.HTTPError as e:
+                print(f"Error querying Serper.dev: {e}")
+                if e.response is not None:
+                    print(f"Raw Serper Error Payload: {e.response.text}")
+            except Exception as e:
+                print(f"Unexpected error: {e}")
 
     # Ensure output directory exists
     os.makedirs('output', exist_ok=True)
@@ -169,9 +182,12 @@ def main():
     if not new_entries_found:
         fe = fg.add_entry()
         fe.id('init-1')
-        fe.title('DJ Chart Aggregator is Live!')
-        fe.link(href='https://github.com/nferrer-dev/dj-chart-aggregator')
-        fe.description('Your custom pipeline is successfully connected via Serper.dev. New charts will appear here when they are published.')
+        fe.title('Pipeline Running (No new charts today)')
+        fe.link(href='https://github.com')
+        fe.description(
+            'Your custom pipeline is successfully connected via Serper.dev. '
+            'New charts will appear here when they are published.'
+        )
         fe.pubDate(datetime.now(timezone.utc))
 
     fg.rss_file('output/feed.xml')

@@ -81,10 +81,13 @@ def main():
             
             # Serper.dev returns search results in the 'organic' array
             for item in data.get('organic', []):
-                link = item.get('link')
+                raw_link = item.get('link', '')
                 title = item.get('title')
                 snippet = item.get('snippet', '')
                 image_url = item.get('imageUrl')
+                
+                # Strip tracking parameters (like ?srsltid=) to prevent duplicate charts
+                link = raw_link.split('?')[0]
                 
                 # Ensure the link is actually one of our target sites to prevent false positives
                 if not any(domain in link for domain in ['beatport.com', 'traxsource.com', 'volumo.com']):

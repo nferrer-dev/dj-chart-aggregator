@@ -76,7 +76,7 @@ def main():
         
         payload = json.dumps({
             "q": query,
-            "num": 50,
+            "num": 10,
             "tbs": "qdr:y"  # Backfill: look for charts indexed in the last year
         })
 

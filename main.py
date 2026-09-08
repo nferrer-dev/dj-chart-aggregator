@@ -92,10 +92,14 @@ def main():
                 resp.raise_for_status()
                 data = resp.json()
                 
+                organic_results = data.get('organic', [])
+                if organic_results:
+                    print(f"Chunk {chunks.index(chunk) + 1}, Page {page}: Found {len(organic_results)} total results from Serper")
+                
                 valid_items = []
                 
                 # Serper.dev returns search results in the 'organic' array
-                for item in data.get('organic', []):
+                for item in organic_results:
                     raw_link = item.get('link') or ""
                     title = item.get('title') or ""
                     snippet = item.get('snippet') or ""

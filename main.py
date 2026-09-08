@@ -48,6 +48,10 @@ def search_beatport_charts(artists):
                 if response.status_code == 200:
                     matches = pattern.findall(response.text)
                     for title, img_url, chart_url in matches:
+                        # Strict Curator Filter: Reject charts by random bedroom DJs
+                        if artist.lower() not in title.lower():
+                            continue
+                            
                         organic_results.append({
                             'title': title.strip(),
                             'link': chart_url.strip(),

@@ -105,8 +105,14 @@ def search_google_charts(artists):
                 data = response.json()
                 results = data.get("organic", [])
                 for r in results:
+                    title = r.get("title", "")
+                    if artist.lower() not in title.lower():
+                        continue
+                    keywords = ['chart', 'pick', 'favorite', 'top', 'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december']
+                    if not any(k in title.lower() for k in keywords):
+                        continue
                     organic_results.append({
-                        'title': r.get("title", "Untitled Chart"),
+                        'title': title,
                         'link': r.get("link", ""),
                         'snippet': r.get("snippet", ""),
                         'image_url': r.get("imageUrl", "")

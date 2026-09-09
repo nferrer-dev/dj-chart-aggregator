@@ -223,9 +223,34 @@ def scrape_volumo(artists):
     return vol_results
 
 # --- MERGE & INTERPOLATE ---
-def merge_and_interpolate(bp_charts, ts_charts, vol_charts):
+def load_existing_charts():
+    charts = []
+    if os.path.exists('chronological_archive.csv'):
+        import csv
+        with open('chronological_archive.csv', 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # 'Status', 'Date', 'Platform', 'Curator', 'Title', 'URL'
+                charts.append({
+                    'title': row['Title'],
+                    'link': row['URL'],
+                    'platform': row['Platform'],
+                    'artist': row['Curator'],
+                    'date_str': row['Date']
+                })
+    return charts
+
+def write_csv(charts):
+    import csv
+    with open('chronological_archive.csv', 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Status', 'Date', 'Platform', 'Curator', 'Title', 'URL'])
+        for c in charts:
+            writer.writerow(['FALSE', c['final_date_str'], c['platform'], c['artist'], c['title'], c['link']])
+
+def merge_and_interpolate(bp_charts, ts_charts, vol_charts, existing_charts=[]):
     print("\n--- STARTING MERGE & INTERPOLATION ---")
-    all_charts = bp_charts + ts_charts + vol_charts
+    all_charts = bp_charts + ts_charts + vol_charts + existing_charts
     
     # Deduplicate by URL
     unique_charts = {}
@@ -274,7 +299,6 @@ def merge_and_interpolate(bp_charts, ts_charts, vol_charts):
     # Apply Interpolation
     months = {'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5, 'june': 6, 'july': 7, 'august': 8, 'september': 9, 'october': 10, 'november': 11, 'december': 12}
     
-    final_lines = []
     for c in charts:
         date_str = c.get('date_str', 'Unknown Date')
         if date_str == "Unknown Date" or date_str == "":
@@ -316,7 +340,7 @@ def merge_and_interpolate(bp_charts, ts_charts, vol_charts):
         
     charts.sort(key=lambda x: x['final_date'], reverse=True)
     
-    # Write to File
+    # Write to Markdown
     with open('chronological_archive.md', 'w', encoding='utf-8') as f:
         f.write("# DJ Charts Archive\n")
         f.write("A master chronological archive of DJ charts curated by the artists.\n")
@@ -325,11 +349,37 @@ def merge_and_interpolate(bp_charts, ts_charts, vol_charts):
         for c in charts:
             f.write(f"- **{c['final_date_str']}** | {c['platform']} | [{c['title']}]({c['link']}) (Curator: {c['artist']})\n")
             
-    print(f"\nSuccessfully generated chronological_archive.md with {len(charts)} fully parsed charts!")
+    # Write to CSV
+    write_csv(charts)
+            
+    print(f"\nSuccessfully generated archive with {len(charts)} fully parsed charts!")
 
 if __name__ == "__main__":
-    artists = get_artists()
-    bp = scrape_beatport(artists)
-    ts = scrape_traxsource(artists)
-    vol = scrape_volumo(artists)
-    merge_and_interpolate(bp, ts, vol)
+    import argparse
+    parser = argparse.ArgumentParser(description="DJ Chart Aggregator Pipeline")
+    parser.add_argument("--add", type=str, help="Add a new artist and merge them into the existing archive")
+    args = parser.parse_args()
+
+    if args.add:
+        print(f"Adding new artist: {args.add}")
+        artists = [args.add]
+        
+        # Also add them to artists.json permanently
+        master_list = get_artists()
+        if args.add not in master_list:
+            master_list.append(args.add)
+            with open('artists.json', 'w', encoding='utf-8') as f:
+                json.dump(master_list, f, indent=4)
+                
+        existing_charts = load_existing_charts()
+        bp = scrape_beatport(artists)
+        ts = scrape_traxsource(artists)
+        vol = scrape_volumo(artists)
+        merge_and_interpolate(bp, ts, vol, existing_charts)
+    else:
+        print("Running full rebuild from scratch for all artists in artists.json...")
+        artists = get_artists()
+        bp = scrape_beatport(artists)
+        ts = scrape_traxsource(artists)
+        vol = scrape_volumo(artists)
+        merge_and_interpolate(bp, ts, vol, [])

@@ -1,0 +1,25 @@
+# Ignore all HTML and JS dumps
+*.html
+*.js
+
+# Ignore python cache
+__pycache__/
+*.pyc
+
+# Ignore massive log files and temporary states
+*.log
+*.jsonl
+trax_results.json
+vol_results.json
+next_data.json
+
+# Keep artists.json and the markdown archives
+!artists.json
+!chronological_archive.md
+
+# Ignore scratch/test scripts
+test_*.py
+find_*.py
+extract_*.py
+fetch_*.py
+explore_*.py
